@@ -14,5 +14,3 @@ Source: Our World in Data / Global Burden of Disease
 - Window functions (LAG, RANK)
 - Views and indexes
 
-## Queries
-See queries.sql for all 10 analytical queries with comments.

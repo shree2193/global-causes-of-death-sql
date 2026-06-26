@@ -29,3 +29,9 @@ PostgreSQL | pgAdmin | Tableau Public
 - Year over year % change in deaths
 - Countries above average for diabetes and cardiovascular deaths
 
+## Resume Summary
+Designed and built a relational PostgreSQL database with 200K+ records 
+across 30+ causes of death. Authored 10 analytical SQL queries using 
+window functions (LAG, RANK, rolling averages), CTEs, and aggregation 
+filters. Built an interactive 4-chart Tableau Public dashboard. Applied 
+composite indexing and created reusable views and stored functions.

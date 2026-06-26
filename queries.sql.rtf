@@ -1,0 +1,201 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2868
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 -- Query 1: Top 10 causes of death globally in 2019\
+SELECT\
+    cause_name,\
+    SUM(death_count) AS total_deaths\
+FROM  deaths_by_cause\
+WHERE year = 2019\
+  AND country_code IS NOT NULL\
+GROUP BY cause_name\
+ORDER BY total_deaths DESC\
+LIMIT 10;\
+\
+-- Query 2: Cardiovascular disease trend over time\
+SELECT\
+    year,\
+    SUM(death_count) AS global_deaths\
+FROM  deaths_by_cause\
+WHERE cause_name = 'Cardiovascular diseases'\
+  AND country_code IS NOT NULL\
+GROUP BY year\
+ORDER BY year;\
+\
+-- Query 3: Countries with highest HIV/AIDS deaths\
+SELECT\
+    entity AS country,\
+    year,\
+    death_count\
+FROM  deaths_by_cause\
+WHERE cause_name = 'HIV/AIDS'\
+  AND death_count IS NOT NULL\
+ORDER BY death_count DESC\
+LIMIT 20;\
+\
+-- Query 4: Year-over-year change in deaths per cause\
+WITH yearly_totals AS (\
+    SELECT\
+        cause_name,\
+        year,\
+        SUM(death_count) AS total_deaths\
+    FROM  deaths_by_cause\
+    WHERE country_code IS NOT NULL\
+    GROUP BY cause_name, year\
+)\
+SELECT\
+    cause_name,\
+    year,\
+    total_deaths,\
+    LAG(total_deaths) OVER (\
+        PARTITION BY cause_name\
+        ORDER BY year\
+    ) AS prev_year_deaths,\
+    ROUND(\
+        (total_deaths - LAG(total_deaths) OVER (\
+            PARTITION BY cause_name ORDER BY year)\
+        ) * 100.0 /\
+        NULLIF(LAG(total_deaths) OVER (\
+            PARTITION BY cause_name ORDER BY year), 0),\
+    2) AS pct_change\
+FROM  yearly_totals\
+ORDER BY cause_name, year;\
+\
+-- Query 5: Top 5 countries per cause of death\
+SELECT *\
+FROM (\
+    SELECT\
+        cause_name,\
+        entity,\
+        total_deaths,\
+        RANK() OVER (\
+            PARTITION BY cause_name\
+            ORDER BY total_deaths DESC\
+        ) AS rank_within_cause\
+    FROM (\
+        SELECT\
+            cause_name,\
+            entity,\
+            SUM(death_count) AS total_deaths\
+        FROM  deaths_by_cause\
+        WHERE country_code IS NOT NULL\
+        GROUP BY cause_name, entity\
+    ) inner_query\
+) ranked\
+WHERE rank_within_cause <= 5\
+ORDER BY cause_name, rank_within_cause;\
+\
+-- Query 6: Each cause as % of total deaths per country in 2019\
+SELECT\
+    entity,\
+    year,\
+    cause_name,\
+    death_count,\
+    ROUND(\
+        death_count * 100.0 /\
+        SUM(death_count) OVER (\
+            PARTITION BY entity, year\
+        ), 2\
+    ) AS pct_of_total\
+FROM  deaths_by_cause\
+WHERE entity = 'United States'\
+  AND year   = 2019\
+ORDER BY death_count DESC;\
+\
+-- Query 7: Create a reusable view\
+CREATE VIEW vw_country_cause_summary AS\
+SELECT\
+    entity,\
+    country_code,\
+    year,\
+    cause_name,\
+    death_count,\
+    SUM(death_count) OVER (\
+        PARTITION BY entity, year\
+    ) AS country_year_total,\
+    ROUND(death_count * 100.0 /\
+        NULLIF(SUM(death_count) OVER (\
+            PARTITION BY entity, year), 0),\
+    2) AS pct_of_country_total\
+FROM deaths_by_cause\
+WHERE country_code IS NOT NULL;\
+\
+-- Use the view:\
+SELECT *\
+FROM   vw_country_cause_summary\
+WHERE  entity = 'India'\
+AND    year   = 2015\
+ORDER BY death_count DESC;\
+\
+-- Query 8: Rolling 3-year average deaths by cause (United States)\
+SELECT\
+    entity,\
+    cause_name,\
+    year,\
+    SUM(death_count) AS deaths,\
+    ROUND(\
+        AVG(SUM(death_count)) OVER (\
+            PARTITION BY entity, cause_name\
+            ORDER BY year\
+            ROWS BETWEEN 2 PRECEDING AND CURRENT ROW\
+        )\
+    , 0) AS rolling_3yr_avg\
+FROM  deaths_by_cause\
+WHERE entity = 'United States'\
+GROUP BY entity, cause_name, year\
+ORDER BY cause_name, year;\
+\
+-- Query 9: Reusable function -- top causes for any country and year range\
+CREATE OR REPLACE FUNCTION get_top_causes(\
+    p_entity    TEXT,\
+    p_year_from SMALLINT,\
+    p_year_to   SMALLINT,\
+    p_limit     INT DEFAULT 10\
+)\
+RETURNS TABLE(cause_name TEXT, total_deaths BIGINT)\
+LANGUAGE SQL STABLE AS\
+$$\
+    SELECT\
+        cause_name::text,\
+        SUM(death_count)\
+    FROM  deaths_by_cause\
+    WHERE entity = p_entity\
+      AND year BETWEEN p_year_from AND p_year_to\
+    GROUP BY cause_name\
+    ORDER BY 2 DESC\
+    LIMIT p_limit;\
+$$;\
+\
+-- Call it:\
+SELECT * FROM get_top_causes('Brazil', 2010::SMALLINT, 2019::SMALLINT);\
+\
+-- Query 10: Countries where both diabetes AND cardiovascular\
+-- deaths are above global average in 2019\
+WITH cause_totals AS (\
+    SELECT\
+        entity,\
+        SUM(death_count) FILTER (\
+            WHERE cause_name = 'Diabetes mellitus'\
+        ) AS diabetes_deaths,\
+        SUM(death_count) FILTER (\
+            WHERE cause_name = 'Cardiovascular diseases'\
+        ) AS cardio_deaths\
+    FROM  deaths_by_cause\
+    WHERE year = 2019\
+      AND country_code IS NOT NULL\
+    GROUP BY entity\
+)\
+SELECT\
+    entity,\
+    diabetes_deaths,\
+    cardio_deaths\
+FROM  cause_totals\
+WHERE diabetes_deaths > (\
+          SELECT AVG(diabetes_deaths) FROM cause_totals)\
+  AND cardio_deaths > (\
+          SELECT AVG(cardio_deaths) FROM cause_totals)\
+ORDER BY cardio_deaths DESC;}
